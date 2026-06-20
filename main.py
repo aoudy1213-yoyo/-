@@ -1,31 +1,45 @@
-from linebot.models import TextSendMessage # 記得補上這個 import
+import os
+from flask import Flask, request, abort
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-@handler.add(MessageEvent, message=TextMessage)
+app = Flask(__name__)
+
+# 設定
+configuration = Configuration(access_token=os.environ.get("CHANNEL_ACCESS_TOKEN"))
+handler = WebhookHandler(os.environ.get("CHANNEL_SECRET"))
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+@handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    user_id = event.source.user_id
-    msg = event.message.text
-    
-    # 1. 處理澆水指令
-    if msg == "澆水":
-        if user_id not in ADMIN_IDS:
-            return
-        # 執行澆水邏輯...
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="收到！系統已開始執行澆水程序。")
-        )
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
         
-    # 2. 處理詢問狀態的指令 (新增的部分)
-    elif msg == "植物狀態":
-        # 這裡未來可以串接你的感測器數據
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="目前植物狀態：濕度 65%，土壤水分正常，狀況良好！")
-        )
+        msg = event.message.text
+        reply_text = "收到訊息：" + msg
         
-    # 3. 處理其他無效指令
-    else:
+        if msg == "植物狀態":
+            reply_text = "目前植物狀態：濕度 65%，正常！"
+        elif msg == "澆水":
+            reply_text = "好的，正在為您澆水..."
+            
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="我不明白您的意思，請輸入「澆水」或「植物狀態」。")
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=reply_text)]
+            )
         )
+
+if __name__ == "__main__":
+    app.run()
